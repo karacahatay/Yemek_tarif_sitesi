@@ -1,0 +1,36 @@
+<%- include('../partials/header.ejs') %>
+<%- include('../partials/topmenu.ejs') %>
+
+<main class="container narrow">
+    <h1><%= contentTitle %></h1>
+
+    <% if (message) { %>
+        <div class="alert"><%= message %></div>
+    <% } %>
+
+    <form method="POST" action="/auth/login<%= urlBack ? '?url=' + encodeURIComponent(urlBack) : '' %>" class="form">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <input type="hidden" name="urlBack" value="<%= urlBack %>">
+
+        <label>
+            <span>Email</span>
+            <input type="email" name="email" value="<%= viewData.email %>" required>
+        </label>
+
+        <label>
+            <span>Şifre</span>
+            <input type="password" name="password" value="<%= viewData.password %>" required>
+        </label>
+
+        <label class="inline">
+            <input type="checkbox" name="cbhatirla" <%= viewData.cbhatirla ? 'checked' : '' %>>
+            <span>Beni hatırla</span>
+        </label>
+
+        <button type="submit">Giriş Yap</button>
+    </form>
+
+    <p class="muted">Hesabın yok mu? <a href="/auth/register">Kayıt ol</a></p>
+</main>
+
+<%- include('../partials/scripts.ejs') %>

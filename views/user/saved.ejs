@@ -1,0 +1,38 @@
+<%- include('../partials/header.ejs') %>
+<%- include('../partials/topmenu.ejs') %>
+
+<main class="container">
+    <div class="layout">
+        <%- include('../partials/side.ejs') %>
+
+        <section class="content">
+            <h1><%= contentTitle %></h1>
+
+            <% if (!data || data.length === 0) { %>
+                <p class="muted">Henüz kaydettiğin tarif yok. Bir tarif sayfasında "Kaydet" butonuna bas.</p>
+            <% } else { %>
+                <p class="muted"><%= data.length %> kayıtlı tarif</p>
+                <div class="recipe-grid">
+                    <% data.forEach(function(r) { %>
+                        <article class="recipe-card">
+                            <a href="/recipe/<%= r.slug %>" class="recipe-card-link">
+                                <% if (r.image) { %>
+                                    <img src="<%= r.image %>" alt="<%= r.title %>">
+                                <% } else { %>
+                                    <div class="recipe-noimg">Görsel yok</div>
+                                <% } %>
+                                <div class="recipe-body">
+                                    <span class="badge"><%= r.categoryName %></span>
+                                    <h3><%= r.title %></h3>
+                                    <p><%= r.exp %></p>
+                                </div>
+                            </a>
+                        </article>
+                    <% }); %>
+                </div>
+            <% } %>
+        </section>
+    </div>
+</main>
+
+<%- include('../partials/scripts.ejs') %>

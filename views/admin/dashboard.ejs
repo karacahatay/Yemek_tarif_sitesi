@@ -1,0 +1,43 @@
+<%- include('../partials/header.ejs') %>
+<%- include('../partials/topmenu.ejs') %>
+
+<main class="container">
+    <div class="layout">
+        <%- include('./admin-side.ejs') %>
+
+        <section class="content">
+            <h1><%= contentTitle %></h1>
+            <p class="muted">Rol: <strong><%= role %></strong></p>
+
+            <div class="stat-cards">
+                <div class="stat-card">
+                    <span class="stat-num"><%= myRecipeCount %></span>
+                    <span class="stat-lbl">
+                        <%= role === "admin" ? "Toplam Tarif" : "Tariflerim" %>
+                    </span>
+                </div>
+                <% if (role === "admin") { %>
+                    <div class="stat-card">
+                        <span class="stat-num"><%= ancCount %></span>
+                        <span class="stat-lbl">Duyuru</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-num"><%= galleryCount %></span>
+                        <span class="stat-lbl">Galeri Görseli</span>
+                    </div>
+                <% } %>
+            </div>
+
+            <div class="quick">
+                <a href="/admin/recipes/new" class="btn">+ Yeni Tarif Ekle</a>
+                <a href="/admin/recipes" class="btn ghost">Tarifleri Yönet</a>
+                <% if (role === "admin") { %>
+                    <a href="/admin/announcements/new" class="btn ghost">+ Yeni Duyuru</a>
+                    <a href="/admin/gallery" class="btn ghost">Galeri</a>
+                <% } %>
+            </div>
+        </section>
+    </div>
+</main>
+
+<%- include('../partials/scripts.ejs') %>

@@ -1,0 +1,8 @@
+<aside class="side">
+    <h3>Kategoriler</h3>
+    <ul class="cat-list">
+        <% (sidebarCategories || []).forEach(function(c) { %>
+            <li><a href="/category/<%= c.slug %>"><%= c.name %></a></li>
+        <% }); %>
+    </ul>
+</aside>

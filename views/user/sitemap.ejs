@@ -1,0 +1,58 @@
+<%- include('../partials/header.ejs') %>
+<%- include('../partials/topmenu.ejs') %>
+
+<main class="container">
+    <div class="layout">
+        <%- include('../partials/side.ejs') %>
+
+        <section class="content">
+            <h1><%= contentTitle %></h1>
+
+            <div class="sitemap-grid">
+                <div>
+                    <h3>Genel</h3>
+                    <ul>
+                        <li><a href="/">Ana Sayfa</a></li>
+                        <li><a href="/search">Arama</a></li>
+                        <li><a href="/search/ingredients">Malzemeye Göre Arama</a></li>
+                        <li><a href="/announcements">Duyurular</a></li>
+                        <li><a href="/gallery">Galeri</a></li>
+                        <li><a href="/sitemap">Site Haritası</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3>Hesap</h3>
+                    <ul>
+                        <% if (isAuth) { %>
+                            <li><a href="/auth/signout">Çıkış</a></li>
+                        <% } else { %>
+                            <li><a href="/auth/login">Giriş</a></li>
+                            <li><a href="/auth/register">Kayıt</a></li>
+                        <% } %>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3>Kategoriler</h3>
+                    <ul>
+                        <% categories.forEach(function(c) { %>
+                            <li><a href="/category/<%= c.slug %>"><%= c.name %></a></li>
+                        <% }); %>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3>Tarifler</h3>
+                    <ul class="sitemap-recipes">
+                        <% recipes.forEach(function(r) { %>
+                            <li><a href="/recipe/<%= r.slug %>"><%= r.title %></a></li>
+                        <% }); %>
+                    </ul>
+                </div>
+            </div>
+        </section>
+    </div>
+</main>
+
+<%- include('../partials/scripts.ejs') %>

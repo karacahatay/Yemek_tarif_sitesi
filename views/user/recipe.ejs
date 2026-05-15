@@ -1,0 +1,108 @@
+<%- include('../partials/header.ejs') %>
+<%- include('../partials/topmenu.ejs') %>
+
+<main class="container">
+    <div class="layout">
+        <%- include('../partials/side.ejs') %>
+
+        <section class="content">
+            <article class="recipe-detail">
+                <div class="meta">
+                    <a href="/category/<%= viewData.categorySlug %>" class="badge">
+                        <%= viewData.categoryName %>
+                    </a>
+                    <span class="muted">
+                        Şef: <%= viewData.chefName %> <%= viewData.chefSurname %>
+                    </span>
+                    <span class="muted">
+                        ❤ <%= viewData.likeCount %> beğeni
+                    </span>
+                </div>
+
+                <h1><%= viewData.title %></h1>
+                <p class="lead"><%= viewData.exp %></p>
+
+                <% if (viewData.image) { %>
+                    <img class="recipe-hero" src="<%= viewData.image %>" alt="<%= viewData.title %>">
+                <% } %>
+
+                <% if (isAuth) { %>
+                    <div class="actions">
+                        <form method="POST" action="/recipe/<%= viewData.recipeid %>/like">
+                            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                            <button type="submit" class="btn-action <%= userLiked ? 'on' : '' %>">
+                                <%= userLiked ? '♥ Beğenildi' : '♡ Beğen' %>
+                            </button>
+                        </form>
+                        <form method="POST" action="/recipe/<%= viewData.recipeid %>/save">
+                            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                            <button type="submit" class="btn-action <%= userSaved ? 'on' : '' %>">
+                                <%= userSaved ? '★ Kayıtlı' : '☆ Kaydet' %>
+                            </button>
+                        </form>
+                    </div>
+                <% } else { %>
+                    <p class="muted small">
+                        Beğenmek, kaydetmek ve yorum yapmak için
+                        <a href="/auth/login?url=<%= encodeURIComponent('/recipe/' + viewData.slug) %>">giriş yap</a>.
+                    </p>
+                <% } %>
+
+                <h2>Malzemeler</h2>
+                <% if (!data || data.length === 0) { %>
+                    <p class="muted">Malzeme listesi yok.</p>
+                <% } else { %>
+                    <ul class="ingredients">
+                        <% data.forEach(function(i) { %>
+                            <li>
+                                <strong><%= i.name %></strong>
+                                <% if (i.amount) { %>— <%= i.amount %><% } %>
+                            </li>
+                        <% }); %>
+                    </ul>
+                <% } %>
+
+                <h2>Yapılışı</h2>
+                <div class="instructions"><%= viewData.instructions %></div>
+
+                <h2 id="yorumlar">Yorumlar (<%= comments.length %>)</h2>
+
+                <% if (isAuth) { %>
+                    <form method="POST" action="/recipe/<%= viewData.recipeid %>/comment" class="form comment-form">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                        <label>
+                            <span>Yorumun</span>
+                            <textarea name="body" rows="3" placeholder="Bu tarif hakkında ne düşünüyorsun?" required></textarea>
+                        </label>
+                        <button type="submit">Yorum Gönder</button>
+                    </form>
+                <% } else { %>
+                    <p class="muted small">
+                        Yorum yapmak için
+                        <a href="/auth/login?url=<%= encodeURIComponent('/recipe/' + viewData.slug + '#yorumlar') %>">giriş yap</a>.
+                    </p>
+                <% } %>
+
+                <% if (!comments || comments.length === 0) { %>
+                    <p class="muted">Henüz yorum yok.</p>
+                <% } else { %>
+                    <ul class="comments">
+                        <% comments.forEach(function(c) { %>
+                            <li>
+                                <div class="comment-head">
+                                    <strong><%= c.userName %> <%= c.userSurname %></strong>
+                                    <span class="muted small">
+                                        <%= new Date(c.createdAt).toLocaleString('tr-TR') %>
+                                    </span>
+                                </div>
+                                <div class="comment-body"><%= c.body %></div>
+                            </li>
+                        <% }); %>
+                    </ul>
+                <% } %>
+            </article>
+        </section>
+    </div>
+</main>
+
+<%- include('../partials/scripts.ejs') %>

@@ -1,0 +1,36 @@
+<%- include('../partials/header.ejs') %>
+<%- include('../partials/topmenu.ejs') %>
+
+<main class="container">
+    <div class="layout">
+        <%- include('../partials/side.ejs') %>
+
+        <section class="content">
+            <h1>Kategori: <%= contentTitle %></h1>
+
+            <% if (!data || data.length === 0) { %>
+                <p class="muted">Bu kategoride tarif yok.</p>
+            <% } else { %>
+                <div class="recipe-grid">
+                    <% data.forEach(function(r) { %>
+                        <article class="recipe-card">
+                            <a href="/recipe/<%= r.slug %>" class="recipe-card-link">
+                                <% if (r.image) { %>
+                                    <img src="<%= r.image %>" alt="<%= r.title %>">
+                                <% } else { %>
+                                    <div class="recipe-noimg">Görsel yok</div>
+                                <% } %>
+                                <div class="recipe-body">
+                                    <h3><%= r.title %></h3>
+                                    <p><%= r.exp %></p>
+                                </div>
+                            </a>
+                        </article>
+                    <% }); %>
+                </div>
+            <% } %>
+        </section>
+    </div>
+</main>
+
+<%- include('../partials/scripts.ejs') %>
