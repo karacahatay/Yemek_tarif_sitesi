@@ -1,10 +1,9 @@
-// User (ziyaretçi + giriş yapmış kullanıcı) controller'ı.
-// Faz 2: ana sayfa, kategori, tarif detay.
-// Faz 3: günün menüsü, arama (metin + malzeme), site haritası.
-// Faz 4: like, save, comment (auth-gated).
+// User controller — JSON API.
+// Public endpoint'ler: home, recipe, category, search, announcements, gallery, sitemap.
+// Auth-gated: like, save, comment, saved.
 const db = require("../model/db.js");
 
-// GET / — ana sayfa, popüler tarifler (like sayısına göre) + aktif duyurular bandı
+// GET /api/home — popüler tarifler + günün menüsü + aktif duyurular
 exports.getHome = async (req, res, next) => {
     try {
         const popular = await db.execute(
@@ -16,17 +15,6 @@ exports.getHome = async (req, res, next) => {
              ORDER BY likeCount DESC, r.createdAt DESC`
         );
 
-        const ancRes = await db.execute(
-            `SELECT noticeid, title, exp, createdAt
-             FROM anc
-             WHERE isactive = 1
-             ORDER BY createdAt DESC
-             LIMIT 3`
-        );
-
-        // Günün menüsü: her kategoriden 1 rastgele tarif, gün içinde sabit.
-        // RAND(TO_DAYS(CURDATE()) + categoryid) → günde değişir, gün içinde aynı.
-        // MySQL 5.7 uyumu için kategori başına ayrı LIMIT 1 sorgusu.
         const cats = await db.execute(
             "SELECT categoryid, name, slug FROM categories ORDER BY name ASC"
         );
@@ -44,56 +32,52 @@ exports.getHome = async (req, res, next) => {
             if (r[0][0]) daily.push(r[0][0]);
         }
 
-        res.render("user/home.ejs", {
-            title: "Ana Sayfa",
-            contentTitle: "Popüler Tarifler",
-            data: popular[0],
+        const anc = await db.execute(
+            `SELECT noticeid, title, exp, createdAt FROM anc
+             WHERE isactive=1 ORDER BY createdAt DESC LIMIT 3`
+        );
+
+        res.json({
+            popular: popular[0],
             dailyMenu: daily,
-            announcements: ancRes[0]
+            announcements: anc[0]
         });
     } catch (err) {
         return next(err);
     }
 };
 
-// GET /category/:slug — kategori sayfası
+// GET /api/category/:slug
 exports.getCategory = async (req, res, next) => {
     try {
         const slug = req.params.slug;
-
-        const catRes = await db.execute(
+        const cat = await db.execute(
             "SELECT categoryid, name, slug FROM categories WHERE slug=?",
             [slug]
         );
-        const category = catRes[0][0];
-        if (!category) return next("Kategori bulunamadı");
+        const category = cat[0][0];
+        if (!category) return res.status(404).json({ error: "Kategori bulunamadı" });
 
         const recipes = await db.execute(
             `SELECT r.recipeid, r.title, r.slug, r.exp, r.image, r.createdAt
-             FROM recipes r
-             WHERE r.categoryid=?
+             FROM recipes r WHERE r.categoryid=?
              ORDER BY r.createdAt DESC`,
             [category.categoryid]
         );
 
-        res.render("user/category.ejs", {
-            title: category.name,
-            contentTitle: category.name,
-            viewData: category,
-            data: recipes[0]
-        });
+        res.json({ category, recipes: recipes[0] });
     } catch (err) {
         return next(err);
     }
 };
 
-// GET /recipe/:slug — tarif detay
+// GET /api/recipe/:slug
 exports.getRecipe = async (req, res, next) => {
     try {
         const slug = req.params.slug;
         const userid = req.session.userid || null;
 
-        const recRes = await db.execute(
+        const rec = await db.execute(
             `SELECT r.recipeid, r.title, r.slug, r.exp, r.instructions, r.image,
                     r.createdAt, r.userid, r.categoryid,
                     c.name AS categoryName, c.slug AS categorySlug,
@@ -105,10 +89,10 @@ exports.getRecipe = async (req, res, next) => {
              WHERE r.slug=?`,
             [slug]
         );
-        const recipe = recRes[0][0];
-        if (!recipe) return next("Tarif bulunamadı");
+        const recipe = rec[0][0];
+        if (!recipe) return res.status(404).json({ error: "Tarif bulunamadı" });
 
-        const ingRes = await db.execute(
+        const ing = await db.execute(
             `SELECT i.name, ri.amount
              FROM recipe_ingredients ri
              JOIN ingredients i ON i.ingredientid = ri.ingredientid
@@ -117,7 +101,7 @@ exports.getRecipe = async (req, res, next) => {
             [recipe.recipeid]
         );
 
-        const commentsRes = await db.execute(
+        const comments = await db.execute(
             `SELECT cm.commentid, cm.body, cm.createdAt,
                     u.name AS userName, u.surname AS userSurname
              FROM comments cm
@@ -127,7 +111,6 @@ exports.getRecipe = async (req, res, next) => {
             [recipe.recipeid]
         );
 
-        // Mevcut kullanıcı bu tarifi beğenmiş/kaydetmiş mi?
         let userLiked = false, userSaved = false;
         if (userid) {
             const lk = await db.execute(
@@ -142,127 +125,199 @@ exports.getRecipe = async (req, res, next) => {
             userSaved = !!sv[0][0];
         }
 
-        res.render("user/recipe.ejs", {
-            title: recipe.title,
-            contentTitle: recipe.title,
-            viewData: recipe,
-            data: ingRes[0],
-            comments: commentsRes[0],
-            userLiked: userLiked,
-            userSaved: userSaved
+        res.json({
+            recipe,
+            ingredients: ing[0],
+            comments: comments[0],
+            userLiked,
+            userSaved
         });
     } catch (err) {
         return next(err);
     }
 };
 
-// POST /recipe/:id/like — toggle. isAuth zorunlu.
+// GET /api/search?q=...
+exports.getSearch = async (req, res, next) => {
+    try {
+        const q = (req.query.q || "").trim();
+        if (!q) return res.json({ q: "", results: [] });
+        const like = "%" + q + "%";
+        const r = await db.execute(
+            `SELECT DISTINCT r.recipeid, r.title, r.slug, r.exp, r.image, r.createdAt,
+                             c.name AS categoryName, c.slug AS categorySlug
+             FROM recipes r
+             JOIN categories c ON c.categoryid = r.categoryid
+             LEFT JOIN recipe_ingredients ri ON ri.recipeid = r.recipeid
+             LEFT JOIN ingredients i         ON i.ingredientid = ri.ingredientid
+             WHERE r.title LIKE ? OR i.name LIKE ?
+             ORDER BY r.createdAt DESC`,
+            [like, like]
+        );
+        res.json({ q, results: r[0] });
+    } catch (err) {
+        return next(err);
+    }
+};
+
+// GET /api/search/ingredients?ing=1&ing=2&...  (AND mantığı)
+exports.getIngredientSearch = async (req, res, next) => {
+    try {
+        let selected = req.query.ing || [];
+        if (!Array.isArray(selected)) selected = [selected];
+        selected = selected.map(x => parseInt(x, 10)).filter(x => Number.isInteger(x));
+
+        if (selected.length === 0) return res.json({ selected: [], results: [] });
+
+        const placeholders = selected.map(() => "?").join(",");
+        const params = [...selected, selected.length];
+        const r = await db.execute(
+            `SELECT r.recipeid, r.title, r.slug, r.exp, r.image,
+                    c.name AS categoryName, c.slug AS categorySlug
+             FROM recipes r
+             JOIN categories c ON c.categoryid = r.categoryid
+             JOIN recipe_ingredients ri ON ri.recipeid = r.recipeid
+             WHERE ri.ingredientid IN (${placeholders})
+             GROUP BY r.recipeid, r.title, r.slug, r.exp, r.image, c.name, c.slug
+             HAVING COUNT(DISTINCT ri.ingredientid) = ?
+             ORDER BY r.createdAt DESC`,
+            params
+        );
+        res.json({ selected, results: r[0] });
+    } catch (err) {
+        return next(err);
+    }
+};
+
+// GET /api/sitemap — kategoriler + tarifler
+exports.getSitemap = async (req, res, next) => {
+    try {
+        const cats = await db.execute(
+            "SELECT name, slug FROM categories ORDER BY name ASC"
+        );
+        const recs = await db.execute(
+            "SELECT title, slug FROM recipes ORDER BY title ASC"
+        );
+        res.json({ categories: cats[0], recipes: recs[0] });
+    } catch (err) {
+        return next(err);
+    }
+};
+
+// GET /api/announcements — public, sadece aktif
+exports.getAnnouncements = async (req, res, next) => {
+    try {
+        const r = await db.execute(
+            `SELECT noticeid, title, exp, createdAt FROM anc
+             WHERE isactive=1 ORDER BY createdAt DESC`
+        );
+        res.json({ announcements: r[0] });
+    } catch (err) {
+        return next(err);
+    }
+};
+
+// GET /api/gallery — public
+exports.getGallery = async (req, res, next) => {
+    try {
+        const r = await db.execute(
+            "SELECT galleryid, title, image, createdAt FROM gallery ORDER BY createdAt DESC"
+        );
+        res.json({ items: r[0] });
+    } catch (err) {
+        return next(err);
+    }
+};
+
+// --- Auth-gated ---
+
+// POST /api/recipe/:id/like — toggle
 exports.postLikeToggle = async (req, res, next) => {
     try {
         const recipeid = parseInt(req.params.id, 10);
         const userid = req.session.userid;
-        if (!Number.isInteger(recipeid)) return next("Geçersiz tarif");
+        if (!Number.isInteger(recipeid)) return res.status(400).json({ error: "Geçersiz tarif" });
 
         const ex = await db.execute(
             "SELECT 1 FROM likes WHERE userid=? AND recipeid=?",
             [userid, recipeid]
         );
+        let liked;
         if (ex[0][0]) {
-            await db.execute(
-                "DELETE FROM likes WHERE userid=? AND recipeid=?",
-                [userid, recipeid]
-            );
+            await db.execute("DELETE FROM likes WHERE userid=? AND recipeid=?", [userid, recipeid]);
+            liked = false;
         } else {
-            await db.execute(
-                "INSERT INTO likes (userid, recipeid) VALUES (?, ?)",
-                [userid, recipeid]
-            );
+            await db.execute("INSERT INTO likes (userid, recipeid) VALUES (?, ?)", [userid, recipeid]);
+            liked = true;
         }
 
-        // Geri tarife dön
-        const slugRes = await db.execute(
-            "SELECT slug FROM recipes WHERE recipeid=?",
+        const cnt = await db.execute(
+            "SELECT COUNT(*) AS c FROM likes WHERE recipeid=?",
             [recipeid]
         );
-        const slug = slugRes[0][0] ? slugRes[0][0].slug : "";
-        return res.redirect("/recipe/" + slug);
+        res.json({ liked, likeCount: cnt[0][0].c });
     } catch (err) {
         return next(err);
     }
 };
 
-// POST /recipe/:id/save — toggle. isAuth zorunlu.
+// POST /api/recipe/:id/save — toggle
 exports.postSaveToggle = async (req, res, next) => {
     try {
         const recipeid = parseInt(req.params.id, 10);
         const userid = req.session.userid;
-        if (!Number.isInteger(recipeid)) return next("Geçersiz tarif");
+        if (!Number.isInteger(recipeid)) return res.status(400).json({ error: "Geçersiz tarif" });
 
         const ex = await db.execute(
             "SELECT 1 FROM saves WHERE userid=? AND recipeid=?",
             [userid, recipeid]
         );
+        let saved;
         if (ex[0][0]) {
-            await db.execute(
-                "DELETE FROM saves WHERE userid=? AND recipeid=?",
-                [userid, recipeid]
-            );
+            await db.execute("DELETE FROM saves WHERE userid=? AND recipeid=?", [userid, recipeid]);
+            saved = false;
         } else {
-            await db.execute(
-                "INSERT INTO saves (userid, recipeid) VALUES (?, ?)",
-                [userid, recipeid]
-            );
+            await db.execute("INSERT INTO saves (userid, recipeid) VALUES (?, ?)", [userid, recipeid]);
+            saved = true;
         }
-
-        const slugRes = await db.execute(
-            "SELECT slug FROM recipes WHERE recipeid=?",
-            [recipeid]
-        );
-        const slug = slugRes[0][0] ? slugRes[0][0].slug : "";
-        return res.redirect("/recipe/" + slug);
+        res.json({ saved });
     } catch (err) {
         return next(err);
     }
 };
 
-// POST /recipe/:id/comment — yorum ekle. isAuth zorunlu.
+// POST /api/recipe/:id/comment  { body }
 exports.postComment = async (req, res, next) => {
     try {
         const recipeid = parseInt(req.params.id, 10);
         const userid = req.session.userid;
         const body = (req.body.body || "").trim();
-        if (!Number.isInteger(recipeid)) return next("Geçersiz tarif");
-        if (!body) {
-            // Boş yorum → sessiz dön
-            const slugRes = await db.execute(
-                "SELECT slug FROM recipes WHERE recipeid=?",
-                [recipeid]
-            );
-            const slug = slugRes[0][0] ? slugRes[0][0].slug : "";
-            return res.redirect("/recipe/" + slug);
-        }
+        if (!Number.isInteger(recipeid)) return res.status(400).json({ error: "Geçersiz tarif" });
+        if (!body) return res.status(400).json({ error: "Yorum boş olamaz" });
 
-        await db.execute(
+        const ins = await db.execute(
             "INSERT INTO comments (recipeid, userid, body) VALUES (?, ?, ?)",
             [recipeid, userid, body]
         );
-
-        const slugRes = await db.execute(
-            "SELECT slug FROM recipes WHERE recipeid=?",
-            [recipeid]
+        const cm = await db.execute(
+            `SELECT cm.commentid, cm.body, cm.createdAt,
+                    u.name AS userName, u.surname AS userSurname
+             FROM comments cm
+             JOIN users u ON u.userid = cm.userid
+             WHERE cm.commentid=?`,
+            [ins[0].insertId]
         );
-        const slug = slugRes[0][0] ? slugRes[0][0].slug : "";
-        return res.redirect("/recipe/" + slug + "#yorumlar");
+        res.json({ comment: cm[0][0] });
     } catch (err) {
         return next(err);
     }
 };
 
-// GET /saved — kullanıcının kaydettiği tarifler. isAuth zorunlu.
+// GET /api/saved
 exports.getSaved = async (req, res, next) => {
     try {
         const userid = req.session.userid;
-        const result = await db.execute(
+        const r = await db.execute(
             `SELECT r.recipeid, r.title, r.slug, r.exp, r.image,
                     c.name AS categoryName, c.slug AS categorySlug,
                     s.createdAt AS savedAt
@@ -273,146 +328,7 @@ exports.getSaved = async (req, res, next) => {
              ORDER BY s.createdAt DESC`,
             [userid]
         );
-        res.render("user/saved.ejs", {
-            title: "Kayıtlarım",
-            contentTitle: "Kayıtlı Tarifler",
-            data: result[0]
-        });
-    } catch (err) {
-        return next(err);
-    }
-};
-
-// GET /search?q=... — tarif adı VEYA malzeme adı eşleşmesi
-exports.getSearch = async (req, res, next) => {
-    try {
-        const q = (req.query.q || "").trim();
-        let recipes = [];
-
-        if (q) {
-            const like = "%" + q + "%";
-            const result = await db.execute(
-                `SELECT DISTINCT r.recipeid, r.title, r.slug, r.exp, r.image,
-                                 c.name AS categoryName, c.slug AS categorySlug
-                 FROM recipes r
-                 JOIN categories c ON c.categoryid = r.categoryid
-                 LEFT JOIN recipe_ingredients ri ON ri.recipeid = r.recipeid
-                 LEFT JOIN ingredients i         ON i.ingredientid = ri.ingredientid
-                 WHERE r.title LIKE ? OR i.name LIKE ?
-                 ORDER BY r.createdAt DESC`,
-                [like, like]
-            );
-            recipes = result[0];
-        }
-
-        res.render("user/search.ejs", {
-            title: "Arama",
-            contentTitle: q ? ("\"" + q + "\" için sonuçlar") : "Arama",
-            q: q,
-            data: recipes
-        });
-    } catch (err) {
-        return next(err);
-    }
-};
-
-// GET /search/ingredients - malzeme listesi + seçilen malzemelere göre sonuçlar
-// ?ing=1&ing=2&ing=3 → bu malzemelerin TAMAMINI içeren tarifler
-exports.getIngredientSearch = async (req, res, next) => {
-    try {
-        const ingAll = await db.execute(
-            "SELECT ingredientid, name FROM ingredients ORDER BY name ASC"
-        );
-
-        // ?ing tek değer veya dizi olabilir
-        let selected = req.query.ing || [];
-        if (!Array.isArray(selected)) selected = [selected];
-        // Sayıya çevir, geçersizleri at
-        selected = selected.map(x => parseInt(x, 10)).filter(x => Number.isInteger(x));
-
-        let recipes = [];
-        if (selected.length > 0) {
-            const placeholders = selected.map(() => "?").join(",");
-            const params = [...selected, selected.length];
-            const result = await db.execute(
-                `SELECT r.recipeid, r.title, r.slug, r.exp, r.image,
-                        c.name AS categoryName, c.slug AS categorySlug
-                 FROM recipes r
-                 JOIN categories c ON c.categoryid = r.categoryid
-                 JOIN recipe_ingredients ri ON ri.recipeid = r.recipeid
-                 WHERE ri.ingredientid IN (${placeholders})
-                 GROUP BY r.recipeid, r.title, r.slug, r.exp, r.image, c.name, c.slug
-                 HAVING COUNT(DISTINCT ri.ingredientid) = ?
-                 ORDER BY r.createdAt DESC`,
-                params
-            );
-            recipes = result[0];
-        }
-
-        res.render("user/ingredient-search.ejs", {
-            title: "Malzemeye Göre Arama",
-            contentTitle: "Malzemeye Göre Arama",
-            data: recipes,
-            ingredients: ingAll[0],
-            selected: selected
-        });
-    } catch (err) {
-        return next(err);
-    }
-};
-
-// GET /announcements — tüm aktif duyurular
-exports.getAnnouncements = async (req, res, next) => {
-    try {
-        const result = await db.execute(
-            `SELECT noticeid, title, exp, createdAt
-             FROM anc
-             WHERE isactive = 1
-             ORDER BY createdAt DESC`
-        );
-        res.render("user/announcements.ejs", {
-            title: "Duyurular",
-            contentTitle: "Duyurular",
-            data: result[0]
-        });
-    } catch (err) {
-        return next(err);
-    }
-};
-
-// GET /gallery — resim galerisi
-exports.getGallery = async (req, res, next) => {
-    try {
-        const result = await db.execute(
-            `SELECT galleryid, title, image, createdAt
-             FROM gallery
-             ORDER BY createdAt DESC`
-        );
-        res.render("user/gallery.ejs", {
-            title: "Galeri",
-            contentTitle: "Resim Galerisi",
-            data: result[0]
-        });
-    } catch (err) {
-        return next(err);
-    }
-};
-
-// GET /sitemap — site haritası
-exports.getSitemap = async (req, res, next) => {
-    try {
-        const cats = await db.execute(
-            "SELECT name, slug FROM categories ORDER BY name ASC"
-        );
-        const recs = await db.execute(
-            "SELECT title, slug FROM recipes ORDER BY title ASC"
-        );
-        res.render("user/sitemap.ejs", {
-            title: "Site Haritası",
-            contentTitle: "Site Haritası",
-            categories: cats[0],
-            recipes: recs[0]
-        });
+        res.json({ items: r[0] });
     } catch (err) {
         return next(err);
     }

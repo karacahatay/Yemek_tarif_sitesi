@@ -1,6 +1,5 @@
-// Admin panel controller'ı.
-// Faz 5a: dashboard + şef tarif CRUD.
-// Faz 5b: duyuru CRUD (admin-only), galeri CRUD (admin-only).
+// Admin controller — JSON API.
+// 5a: tarif CRUD (chef + admin). 5b: duyuru + galeri (admin-only).
 const fs = require("fs");
 const path = require("path");
 const slugify = require("slugify");
@@ -8,7 +7,7 @@ const db = require("../model/db.js");
 
 const tr = (s) => slugify(s, { lower: true, strict: true, locale: "tr" });
 
-// GET /admin
+// GET /api/admin/dashboard
 exports.getDashboard = async (req, res, next) => {
     try {
         const userid = req.session.userid;
@@ -31,26 +30,19 @@ exports.getDashboard = async (req, res, next) => {
             galleryCount = g[0][0].c;
         }
 
-        res.render("admin/dashboard.ejs", {
-            title: "Panel",
-            contentTitle: "Panel",
-            myRecipeCount: myRecipeCount,
-            ancCount: ancCount,
-            galleryCount: galleryCount
-        });
+        res.json({ role, myRecipeCount, ancCount, galleryCount });
     } catch (err) {
         return next(err);
     }
 };
 
-// GET /admin/recipes — şef ise kendi tarifleri, admin ise tümü
+// GET /api/admin/recipes
 exports.getRecipes = async (req, res, next) => {
     try {
         const userid = req.session.userid;
-        const role = req.session.role;
-        const isAdmin = role === "admin";
+        const isAdmin = req.session.role === "admin";
 
-        const result = await db.execute(
+        const r = await db.execute(
             `SELECT r.recipeid, r.title, r.slug, r.image, r.createdAt,
                     c.name AS categoryName,
                     u.name AS chefName, u.surname AS chefSurname
@@ -61,44 +53,14 @@ exports.getRecipes = async (req, res, next) => {
              ORDER BY r.createdAt DESC`,
             isAdmin ? [] : [userid]
         );
-
-        res.render("admin/recipes.ejs", {
-            title: "Tarifler",
-            contentTitle: isAdmin ? "Tüm Tarifler" : "Tariflerim",
-            data: result[0]
-        });
+        res.json({ recipes: r[0] });
     } catch (err) {
         return next(err);
     }
 };
 
-// GET /admin/recipes/new — yeni tarif formu
-exports.getRecipeForm = async (req, res, next) => {
-    try {
-        const cats = await db.execute(
-            "SELECT categoryid, name FROM categories ORDER BY name ASC"
-        );
-        const ings = await db.execute(
-            "SELECT ingredientid, name FROM ingredients ORDER BY name ASC"
-        );
-        res.render("admin/recipe-form.ejs", {
-            title: "Yeni Tarif",
-            contentTitle: "Yeni Tarif",
-            categories: cats[0],
-            ingredients: ings[0],
-            viewData: { title: "", exp: "", instructions: "", categoryid: null },
-            selectedIngredients: {},
-            message: req.session.message || null
-        });
-        req.session.message = null;
-    } catch (err) {
-        return next(err);
-    }
-};
-
-// POST /admin/recipes — yeni tarif kaydet
-// multer ile "image" alanı, kapak görseli (opsiyonel).
-// Malzemeler: ing_<id>=on (checkbox) + amt_<id>=miktar (text)
+// POST /api/admin/recipes — multer single("image")
+// FormData ile gelir. Malzemeler: ing_<id>=on + amt_<id>=miktar
 exports.postRecipe = async (req, res, next) => {
     try {
         const userid = req.session.userid;
@@ -108,29 +70,21 @@ exports.postRecipe = async (req, res, next) => {
         const categoryid = parseInt(req.body.categoryid, 10);
 
         if (!title || !exp || !instructions || !Number.isInteger(categoryid)) {
-            req.session.message = "Tüm alanları doldurun.";
-            return res.redirect("/admin/recipes/new");
+            return res.status(400).json({ error: "Tüm alanları doldurun" });
         }
 
-        // Slug benzersizliği: aynı slug varsa -2, -3 ekle
         let baseSlug = tr(title);
         if (!baseSlug) baseSlug = "tarif";
         let slug = baseSlug;
         let i = 2;
-        // eslint-disable-next-line no-constant-condition
         while (true) {
-            const ex = await db.execute(
-                "SELECT 1 FROM recipes WHERE slug=?",
-                [slug]
-            );
+            const ex = await db.execute("SELECT 1 FROM recipes WHERE slug=?", [slug]);
             if (!ex[0][0]) break;
             slug = baseSlug + "-" + i;
             i++;
         }
 
-        const image = req.file
-            ? "/static/uploads/recipes/" + req.file.filename
-            : null;
+        const image = req.file ? "/static/uploads/recipes/" + req.file.filename : null;
 
         const ins = await db.execute(
             `INSERT INTO recipes (title, slug, exp, instructions, image, categoryid, userid)
@@ -139,7 +93,6 @@ exports.postRecipe = async (req, res, next) => {
         );
         const recipeid = ins[0].insertId;
 
-        // Malzemeler: req.body anahtarlarında ing_<id> ve amt_<id>
         const ingIds = [];
         for (const key of Object.keys(req.body)) {
             if (key.startsWith("ing_")) {
@@ -155,190 +108,145 @@ exports.postRecipe = async (req, res, next) => {
             );
         }
 
-        return res.redirect("/admin/recipes");
+        res.json({ ok: true, recipeid, slug });
     } catch (err) {
         return next(err);
     }
 };
 
-// POST /admin/recipes/:id/delete
-// Şef sadece kendi tarifini silebilir; admin her şeyi.
+// POST /api/admin/recipes/:id/delete
 exports.postRecipeDelete = async (req, res, next) => {
     try {
         const userid = req.session.userid;
         const role = req.session.role;
         const recipeid = parseInt(req.params.id, 10);
-        if (!Number.isInteger(recipeid)) return next("Geçersiz tarif");
+        if (!Number.isInteger(recipeid)) return res.status(400).json({ error: "Geçersiz tarif" });
 
-        const r = await db.execute(
-            "SELECT userid FROM recipes WHERE recipeid=?",
-            [recipeid]
-        );
+        const r = await db.execute("SELECT userid FROM recipes WHERE recipeid=?", [recipeid]);
         const row = r[0][0];
-        if (!row) return next("Tarif bulunamadı");
-
+        if (!row) return res.status(404).json({ error: "Tarif bulunamadı" });
         if (role !== "admin" && row.userid !== userid) {
-            return next("Bu tarifi silme yetkin yok.");
+            return res.status(403).json({ error: "Bu tarifi silme yetkin yok" });
         }
 
         await db.execute("DELETE FROM recipes WHERE recipeid=?", [recipeid]);
-        return res.redirect("/admin/recipes");
+        res.json({ ok: true });
     } catch (err) {
         return next(err);
     }
 };
 
 // ============================================================
-// Duyurular (anc) — admin-only
+// Duyurular (admin-only)
 // ============================================================
 
-// GET /admin/announcements
 exports.getAnnouncements = async (req, res, next) => {
     try {
-        const result = await db.execute(
+        const r = await db.execute(
             `SELECT a.noticeid, a.title, a.exp, a.isactive, a.createdAt,
                     u.name AS userName, u.surname AS userSurname
-             FROM anc a
-             JOIN users u ON u.userid = a.userid
+             FROM anc a JOIN users u ON u.userid = a.userid
              ORDER BY a.createdAt DESC`
         );
-        res.render("admin/announcements.ejs", {
-            title: "Duyurular",
-            contentTitle: "Duyurular",
-            data: result[0]
-        });
+        res.json({ announcements: r[0] });
     } catch (err) {
         return next(err);
     }
 };
 
-// GET /admin/announcements/new
-exports.getAnnouncementForm = async (req, res, next) => {
-    try {
-        res.render("admin/announcement-form.ejs", {
-            title: "Yeni Duyuru",
-            contentTitle: "Yeni Duyuru",
-            viewData: { title: "", exp: "", isactive: 1 }
-        });
-    } catch (err) {
-        return next(err);
-    }
-};
-
-// POST /admin/announcements
 exports.postAnnouncement = async (req, res, next) => {
     try {
         const userid = req.session.userid;
         const title = (req.body.title || "").trim();
         const exp = (req.body.exp || "").trim();
-        const isactive = req.body.isactive === "on" ? 1 : 0;
+        const isactive = req.body.isactive ? 1 : 0;
+        if (!title || !exp) return res.status(400).json({ error: "Başlık ve içerik zorunlu" });
 
-        if (!title || !exp) {
-            return next("Başlık ve içerik boş olamaz.");
-        }
-
-        await db.execute(
+        const ins = await db.execute(
             "INSERT INTO anc (title, exp, isactive, userid) VALUES (?, ?, ?, ?)",
             [title, exp, isactive, userid]
         );
-        return res.redirect("/admin/announcements");
+        res.json({ ok: true, noticeid: ins[0].insertId });
     } catch (err) {
         return next(err);
     }
 };
 
-// POST /admin/announcements/:id/toggle — aktif/pasif
 exports.postAnnouncementToggle = async (req, res, next) => {
     try {
         const noticeid = parseInt(req.params.id, 10);
-        if (!Number.isInteger(noticeid)) return next("Geçersiz duyuru");
-        await db.execute(
-            "UPDATE anc SET isactive = 1 - isactive WHERE noticeid=?",
-            [noticeid]
-        );
-        return res.redirect("/admin/announcements");
+        if (!Number.isInteger(noticeid)) return res.status(400).json({ error: "Geçersiz duyuru" });
+        await db.execute("UPDATE anc SET isactive = 1 - isactive WHERE noticeid=?", [noticeid]);
+        const r = await db.execute("SELECT isactive FROM anc WHERE noticeid=?", [noticeid]);
+        res.json({ ok: true, isactive: r[0][0] ? r[0][0].isactive : null });
     } catch (err) {
         return next(err);
     }
 };
 
-// POST /admin/announcements/:id/delete
 exports.postAnnouncementDelete = async (req, res, next) => {
     try {
         const noticeid = parseInt(req.params.id, 10);
-        if (!Number.isInteger(noticeid)) return next("Geçersiz duyuru");
+        if (!Number.isInteger(noticeid)) return res.status(400).json({ error: "Geçersiz duyuru" });
         await db.execute("DELETE FROM anc WHERE noticeid=?", [noticeid]);
-        return res.redirect("/admin/announcements");
+        res.json({ ok: true });
     } catch (err) {
         return next(err);
     }
 };
 
 // ============================================================
-// Galeri — admin-only. Görseller public/uploads/gallery/'e.
+// Galeri (admin-only)
 // ============================================================
 
-// GET /admin/gallery
 exports.getGallery = async (req, res, next) => {
     try {
-        const result = await db.execute(
+        const r = await db.execute(
             `SELECT g.galleryid, g.title, g.image, g.createdAt,
                     u.name AS userName, u.surname AS userSurname
-             FROM gallery g
-             JOIN users u ON u.userid = g.userid
+             FROM gallery g JOIN users u ON u.userid = g.userid
              ORDER BY g.createdAt DESC`
         );
-        res.render("admin/gallery.ejs", {
-            title: "Galeri",
-            contentTitle: "Galeri",
-            data: result[0]
-        });
+        res.json({ items: r[0] });
     } catch (err) {
         return next(err);
     }
 };
 
-// POST /admin/gallery — multer "image" alanı
 exports.postGallery = async (req, res, next) => {
     try {
         const userid = req.session.userid;
         const title = (req.body.title || "").trim() || "Görsel";
-        if (!req.file) return next("Görsel yüklenmedi.");
-
+        if (!req.file) return res.status(400).json({ error: "Görsel yüklenmedi" });
         const image = "/static/uploads/gallery/" + req.file.filename;
-        await db.execute(
+        const ins = await db.execute(
             "INSERT INTO gallery (title, image, userid) VALUES (?, ?, ?)",
             [title, image, userid]
         );
-        return res.redirect("/admin/gallery");
+        res.json({ ok: true, galleryid: ins[0].insertId, image });
     } catch (err) {
         return next(err);
     }
 };
 
-// POST /admin/gallery/:id/delete — DB'den ve diskten sil
 exports.postGalleryDelete = async (req, res, next) => {
     try {
         const galleryid = parseInt(req.params.id, 10);
-        if (!Number.isInteger(galleryid)) return next("Geçersiz öğe");
+        if (!Number.isInteger(galleryid)) return res.status(400).json({ error: "Geçersiz öğe" });
 
-        const row = await db.execute(
-            "SELECT image FROM gallery WHERE galleryid=?",
-            [galleryid]
-        );
+        const row = await db.execute("SELECT image FROM gallery WHERE galleryid=?", [galleryid]);
         const item = row[0][0];
-        if (!item) return next("Galeri öğesi bulunamadı");
+        if (!item) return res.status(404).json({ error: "Bulunamadı" });
 
         await db.execute("DELETE FROM gallery WHERE galleryid=?", [galleryid]);
 
-        // Diskten sil. Hata olursa yok say (DB tutarlılığı öncelik).
         if (item.image && item.image.startsWith("/static/")) {
             const rel = item.image.replace(/^\/static\//, "");
             const abs = path.join(__dirname, "..", "public", rel);
             fs.unlink(abs, () => { /* yut */ });
         }
 
-        return res.redirect("/admin/gallery");
+        res.json({ ok: true });
     } catch (err) {
         return next(err);
     }
