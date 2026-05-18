@@ -67,6 +67,9 @@ CREATE TABLE IF NOT EXISTS recipes (
     exp          TEXT NOT NULL,
     instructions TEXT NOT NULL,
     image        VARCHAR(255) DEFAULT NULL,
+    servings     INT NOT NULL DEFAULT 4,
+    prepMinutes  INT NOT NULL DEFAULT 15,
+    cookMinutes  INT NOT NULL DEFAULT 30,
     categoryid   INT NOT NULL,
     userid       INT NOT NULL,
     createdAt    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -84,6 +87,21 @@ CREATE TABLE IF NOT EXISTS recipe_ingredients (
     PRIMARY KEY (recipeid, ingredientid),
     FOREIGN KEY (recipeid) REFERENCES recipes(recipeid) ON DELETE CASCADE,
     FOREIGN KEY (ingredientid) REFERENCES ingredients(ingredientid) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ============================================================
+-- recipe_steps: tarifin adım adım yapılışı + adım görseli
+-- image alanı local /static/uploads/recipes/... yolu tutar.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS recipe_steps (
+    stepid    INT AUTO_INCREMENT PRIMARY KEY,
+    recipeid  INT NOT NULL,
+    stepOrder INT NOT NULL,
+    body      TEXT NOT NULL,
+    image     VARCHAR(255) DEFAULT NULL,
+    createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_recipe_step_order (recipeid, stepOrder),
+    FOREIGN KEY (recipeid) REFERENCES recipes(recipeid) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- ============================================================

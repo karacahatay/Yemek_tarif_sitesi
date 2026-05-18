@@ -79,6 +79,7 @@ exports.getRecipe = async (req, res, next) => {
 
         const rec = await db.execute(
             `SELECT r.recipeid, r.title, r.slug, r.exp, r.instructions, r.image,
+                    r.servings, r.prepMinutes, r.cookMinutes,
                     r.createdAt, r.userid, r.categoryid,
                     c.name AS categoryName, c.slug AS categorySlug,
                     u.name AS chefName, u.surname AS chefSurname,
@@ -111,6 +112,14 @@ exports.getRecipe = async (req, res, next) => {
             [recipe.recipeid]
         );
 
+        const steps = await db.execute(
+            `SELECT stepid, stepOrder, body, image
+             FROM recipe_steps
+             WHERE recipeid=?
+             ORDER BY stepOrder ASC`,
+            [recipe.recipeid]
+        );
+
         let userLiked = false, userSaved = false;
         if (userid) {
             const lk = await db.execute(
@@ -128,6 +137,7 @@ exports.getRecipe = async (req, res, next) => {
         res.json({
             recipe,
             ingredients: ing[0],
+            steps: steps[0],
             comments: comments[0],
             userLiked,
             userSaved

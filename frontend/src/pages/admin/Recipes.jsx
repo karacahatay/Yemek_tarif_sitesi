@@ -67,9 +67,14 @@ export default function Recipes() {
                                     {new Date(r.createdAt).toLocaleDateString("tr-TR")}
                                 </td>
                                 <td>
-                                    <button type="button" className="btn-danger" onClick={() => onDelete(r.recipeid)}>
-                                        Sil
-                                    </button>
+                                    <div className="row-actions">
+                                        <Link className="btn-ghost-sm" to={"/admin/recipes/" + r.recipeid + "/edit"}>
+                                            Düzenle
+                                        </Link>
+                                        <button type="button" className="btn-danger" onClick={() => onDelete(r.recipeid)}>
+                                            Sil
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         ))}

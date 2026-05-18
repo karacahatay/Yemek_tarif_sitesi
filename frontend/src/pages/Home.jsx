@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { apiGet } from "../api/client.js";
 import RecipeCard from "../components/RecipeCard.jsx";
 
-function Hero() {
+function Hero({ recipeCount, categoryCount }) {
     return (
         <section className="hero">
             <div className="hero-inner">
@@ -24,11 +24,11 @@ function Hero() {
                     </div>
                     <div className="hero-stats">
                         <div className="hero-stat">
-                            <span className="num">5+</span>
+                            <span className="num">{recipeCount || "5+"}</span>
                             <span className="lbl">Tarif</span>
                         </div>
                         <div className="hero-stat">
-                            <span className="num">5</span>
+                            <span className="num">{categoryCount || 5}</span>
                             <span className="lbl">Kategori</span>
                         </div>
                         <div className="hero-stat">
@@ -70,7 +70,10 @@ export default function Home() {
 
     return (
         <>
-            <Hero />
+            <Hero
+                recipeCount={popular ? popular.length : null}
+                categoryCount={dailyMenu ? dailyMenu.length : null}
+            />
 
             {announcements && announcements.length > 0 && (
                 <div className="anc-banner">

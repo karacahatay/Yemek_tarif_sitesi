@@ -22,7 +22,7 @@ export default function Recipe() {
     if (err) return <div className="alert error">{err}</div>;
     if (!data) return <p className="muted">Yükleniyor…</p>;
 
-    const { recipe, ingredients, comments, userLiked, userSaved } = data;
+    const { recipe, ingredients, steps, comments, userLiked, userSaved } = data;
 
     const onLike = async () => {
         try {
@@ -64,6 +64,25 @@ export default function Recipe() {
             <h1>{recipe.title}</h1>
             <p className="lead">{recipe.exp}</p>
 
+            <div className="recipe-facts" aria-label="Tarif bilgileri">
+                <div>
+                    <span>Kaç kişilik</span>
+                    <strong>{recipe.servings || 4} kişilik</strong>
+                </div>
+                <div>
+                    <span>Hazırlama</span>
+                    <strong>{recipe.prepMinutes || 0} dk</strong>
+                </div>
+                <div>
+                    <span>Pişirme</span>
+                    <strong>{recipe.cookMinutes || 0} dk</strong>
+                </div>
+                <div>
+                    <span>Toplam</span>
+                    <strong>{(recipe.prepMinutes || 0) + (recipe.cookMinutes || 0)} dk</strong>
+                </div>
+            </div>
+
             {recipe.image && (
                 <img className="recipe-hero" src={recipe.image} alt={recipe.title} />
             )}
@@ -98,7 +117,17 @@ export default function Recipe() {
             )}
 
             <h2>Yapılışı</h2>
-            <div className="instructions">{recipe.instructions}</div>
+            {steps && steps.length > 0 ? (
+                <ol className="recipe-steps">
+                    {steps.map(step => (
+                        <li key={step.stepid || step.stepOrder} className="recipe-step">
+                            <div className="step-text">{step.body}</div>
+                        </li>
+                    ))}
+                </ol>
+            ) : (
+                <div className="instructions">{recipe.instructions}</div>
+            )}
 
             <h2 id="yorumlar">Yorumlar ({comments.length})</h2>
 

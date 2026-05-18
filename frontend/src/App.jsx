@@ -60,6 +60,7 @@ export default function App() {
                     <Route index                         element={<AdminDashboard />} />
                     <Route path="recipes"                element={<AdminRecipes />} />
                     <Route path="recipes/new"            element={<AdminRecipeForm />} />
+                    <Route path="recipes/:id/edit"       element={<AdminRecipeForm />} />
                     {/* Admin-only — backend ayrıca 403 döner; UI guard rol kontrolü yapar */}
                     <Route path="announcements"          element={<RequireAuth roles={["admin"]}><AdminAnnouncements /></RequireAuth>} />
                     <Route path="announcements/new"      element={<RequireAuth roles={["admin"]}><AdminAnnouncementForm /></RequireAuth>} />

@@ -17,6 +17,8 @@ router.get("/dashboard",            adminController.getDashboard);
 // Tarif (chef + admin)
 router.get("/recipes",              adminController.getRecipes);
 router.post("/recipes",             uploadRecipe.single("image"), adminController.postRecipe);
+router.get("/recipes/:id",          adminController.getRecipe);
+router.post("/recipes/:id",         uploadRecipe.single("image"), adminController.postRecipeUpdate);
 router.post("/recipes/:id/delete",  adminController.postRecipeDelete);
 
 // Duyuru (admin)

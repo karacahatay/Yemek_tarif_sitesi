@@ -1,12 +1,13 @@
 // MySQL bağlantısı - .promise() ile dışa aktarılır.
-// CLAUDE.md: Tüm controller'lar bu .promise() sözleşmesine bağlıdır.
+// AGENTS.md: Tüm controller'lar db.execute(sql, params) -> [rows, fields] sözleşmesine bağlıdır.
 const mysql = require("mysql2");
 
-let connection = mysql.createConnection({
-    host: "localhost",
-    user: "root",
-    password: "[PASSWORD]",
-    database: "food_web"
+const connection = mysql.createConnection({
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "123456",
+    database: process.env.DB_NAME || "food_web",
+    charset: "utf8mb4"
 });
 
 connection.connect(err => {

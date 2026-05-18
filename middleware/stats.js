@@ -19,6 +19,7 @@ function extractIp(req) {
 
 async function getStats() {
     try {
+        pruneOnline();
         const cnt = await db.execute("SELECT COUNT(*) AS total FROM visitors");
         return {
             visitorCount: cnt[0][0].total,
@@ -29,6 +30,13 @@ async function getStats() {
     }
 }
 
+function onlineKey(req, ip) {
+    if (req.session && req.session.isAuth && req.session.userid) {
+        return "user:" + req.session.userid;
+    }
+    return "ip:" + ip;
+}
+
 const middleware = async (req, res, next) => {
     try {
         const ip = extractIp(req);
@@ -37,8 +45,7 @@ const middleware = async (req, res, next) => {
              ON DUPLICATE KEY UPDATE visits = visits + 1`,
             [ip]
         );
-        const sid = req.sessionID || ip;
-        activeSessions.set(sid, Date.now());
+        activeSessions.set(onlineKey(req, ip), Date.now());
         pruneOnline();
         next();
     } catch (err) {

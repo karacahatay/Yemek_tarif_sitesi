@@ -1,19 +1,29 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { apiGet, apiPostForm } from "../../api/client.js";
 
 export default function RecipeForm() {
     const navigate = useNavigate();
+    const { id } = useParams();
+    const isEdit = Boolean(id);
     const [categories, setCategories] = useState([]);
     const [ingredients, setIngredients] = useState([]);
     const [form, setForm] = useState({
-        title: "", exp: "", instructions: "", categoryid: ""
+        title: "",
+        exp: "",
+        instructions: "",
+        servings: "4",
+        prepMinutes: "15",
+        cookMinutes: "30",
+        categoryid: ""
     });
     const [imageFile, setImageFile] = useState(null);
+    const [currentImage, setCurrentImage] = useState(null);
     // ingState[id] = { selected: bool, amount: string }
     const [ingState, setIngState] = useState({});
     const [err, setErr] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [loadingRecipe, setLoadingRecipe] = useState(isEdit);
 
     useEffect(() => {
         apiGet("/api/categories")
@@ -23,6 +33,41 @@ export default function RecipeForm() {
             .then(d => setIngredients(d.ingredients || []))
             .catch(() => { /* yut */ });
     }, []);
+
+    useEffect(() => {
+        if (!isEdit) return;
+        setLoadingRecipe(true);
+        setErr(null);
+        apiGet("/api/admin/recipes/" + id)
+            .then(d => {
+                const recipe = d.recipe;
+                const stepText = d.steps && d.steps.length > 0
+                    ? d.steps.map(s => s.body).join("\n")
+                    : (recipe.instructions || "");
+
+                setForm({
+                    title: recipe.title || "",
+                    exp: recipe.exp || "",
+                    instructions: stepText,
+                    servings: String(recipe.servings || 4),
+                    prepMinutes: String(recipe.prepMinutes || 15),
+                    cookMinutes: String(recipe.cookMinutes || 30),
+                    categoryid: String(recipe.categoryid || "")
+                });
+                setCurrentImage(recipe.image || null);
+
+                const nextIng = {};
+                for (const ing of d.ingredients || []) {
+                    nextIng[ing.ingredientid] = {
+                        selected: true,
+                        amount: ing.amount || ""
+                    };
+                }
+                setIngState(nextIng);
+            })
+            .catch(e => setErr(e.message))
+            .finally(() => setLoadingRecipe(false));
+    }, [id, isEdit]);
 
     const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
@@ -52,6 +97,9 @@ export default function RecipeForm() {
             fd.append("title", form.title);
             fd.append("exp", form.exp);
             fd.append("instructions", form.instructions);
+            fd.append("servings", form.servings);
+            fd.append("prepMinutes", form.prepMinutes);
+            fd.append("cookMinutes", form.cookMinutes);
             fd.append("categoryid", form.categoryid);
             if (imageFile) fd.append("image", imageFile);
 
@@ -64,7 +112,7 @@ export default function RecipeForm() {
                 }
             }
 
-            await apiPostForm("/api/admin/recipes", fd);
+            await apiPostForm(isEdit ? "/api/admin/recipes/" + id : "/api/admin/recipes", fd);
             navigate("/admin/recipes");
         } catch (e2) {
             setErr(e2.message);
@@ -73,9 +121,11 @@ export default function RecipeForm() {
         }
     };
 
+    if (loadingRecipe) return <p className="muted">Yükleniyor…</p>;
+
     return (
         <>
-            <h1>Yeni Tarif</h1>
+            <h1>{isEdit ? "Tarifi Düzenle" : "Yeni Tarif"}</h1>
             {err && <div className="alert error">{err}</div>}
 
             <form className="form" onSubmit={onSubmit}>
@@ -94,6 +144,21 @@ export default function RecipeForm() {
                     <textarea rows="6" value={form.instructions} onChange={set("instructions")} required />
                 </label>
 
+                <div className="form-grid three">
+                    <label>
+                        <span>Kaç kişilik</span>
+                        <input type="number" min="1" value={form.servings} onChange={set("servings")} required />
+                    </label>
+                    <label>
+                        <span>Hazırlama (dk)</span>
+                        <input type="number" min="0" value={form.prepMinutes} onChange={set("prepMinutes")} required />
+                    </label>
+                    <label>
+                        <span>Pişirme (dk)</span>
+                        <input type="number" min="0" value={form.cookMinutes} onChange={set("cookMinutes")} required />
+                    </label>
+                </div>
+
                 <label>
                     <span>Kategori</span>
                     <select value={form.categoryid} onChange={set("categoryid")} required>
@@ -105,13 +170,20 @@ export default function RecipeForm() {
                 </label>
 
                 <label>
-                    <span>Kapak görseli (opsiyonel, max 5MB)</span>
+                    <span>{isEdit ? "Yeni kapak görseli (opsiyonel, max 5MB)" : "Kapak görseli (opsiyonel, max 5MB)"}</span>
                     <input
                         type="file"
                         accept="image/*"
                         onChange={e => setImageFile(e.target.files?.[0] || null)}
                     />
                 </label>
+
+                {isEdit && currentImage && (
+                    <div>
+                        <span className="muted small">Mevcut kapak görseli</span>
+                        <img src={currentImage} alt="" className="thumb" />
+                    </div>
+                )}
 
                 <fieldset className="ing-fieldset">
                     <legend>Malzemeler</legend>
@@ -139,7 +211,7 @@ export default function RecipeForm() {
                 </fieldset>
 
                 <button type="submit" disabled={busy}>
-                    {busy ? "Kaydediliyor…" : "Tarifi Kaydet"}
+                    {busy ? "Kaydediliyor…" : (isEdit ? "Değişiklikleri Kaydet" : "Tarifi Kaydet")}
                 </button>
             </form>
         </>

@@ -7,6 +7,105 @@ const db = require("../model/db.js");
 
 const tr = (s) => slugify(s, { lower: true, strict: true, locale: "tr" });
 
+function parseRecipeBody(body) {
+    const title = (body.title || "").trim();
+    const exp = (body.exp || "").trim();
+    const instructions = (body.instructions || "").trim();
+    const categoryid = parseInt(body.categoryid, 10);
+    const servings = parseInt(body.servings || "4", 10);
+    const prepMinutes = parseInt(body.prepMinutes || "15", 10);
+    const cookMinutes = parseInt(body.cookMinutes || "30", 10);
+
+    return {
+        title,
+        exp,
+        instructions,
+        categoryid,
+        servings: Number.isInteger(servings) && servings > 0 ? servings : 4,
+        prepMinutes: Number.isInteger(prepMinutes) && prepMinutes >= 0 ? prepMinutes : 15,
+        cookMinutes: Number.isInteger(cookMinutes) && cookMinutes >= 0 ? cookMinutes : 30
+    };
+}
+
+async function makeUniqueSlug(title, ignoreRecipeid = null) {
+    let baseSlug = tr(title);
+    if (!baseSlug) baseSlug = "tarif";
+    let slug = baseSlug;
+    let i = 2;
+
+    while (true) {
+        const ex = ignoreRecipeid
+            ? await db.execute("SELECT 1 FROM recipes WHERE slug=? AND recipeid<>?", [slug, ignoreRecipeid])
+            : await db.execute("SELECT 1 FROM recipes WHERE slug=?", [slug]);
+        if (!ex[0][0]) return slug;
+        slug = baseSlug + "-" + i;
+        i++;
+    }
+}
+
+function collectIngredientRows(body) {
+    const rows = [];
+    for (const key of Object.keys(body)) {
+        if (key.startsWith("ing_")) {
+            const id = parseInt(key.substring(4), 10);
+            if (Number.isInteger(id)) {
+                const amt = (body["amt_" + id] || "").toString().trim() || null;
+                rows.push([id, amt]);
+            }
+        }
+    }
+    return rows;
+}
+
+async function replaceRecipeIngredients(recipeid, body) {
+    await db.execute("DELETE FROM recipe_ingredients WHERE recipeid=?", [recipeid]);
+    for (const [id, amt] of collectIngredientRows(body)) {
+        await db.execute(
+            "INSERT INTO recipe_ingredients (recipeid, ingredientid, amount) VALUES (?, ?, ?)",
+            [recipeid, id, amt]
+        );
+    }
+}
+
+async function replaceRecipeSteps(recipeid, instructions) {
+    await db.execute("DELETE FROM recipe_steps WHERE recipeid=?", [recipeid]);
+    const steps = instructions
+        .split(/\r?\n/)
+        .map(s => s.trim())
+        .filter(Boolean);
+
+    for (let i = 0; i < steps.length; i++) {
+        await db.execute(
+            "INSERT INTO recipe_steps (recipeid, stepOrder, body, image) VALUES (?, ?, ?, NULL)",
+            [recipeid, i + 1, steps[i]]
+        );
+    }
+}
+
+function removeOldRecipeUpload(image) {
+    if (!image || !image.startsWith("/static/uploads/recipes/")) return;
+    const rel = image.replace(/^\/static\//, "");
+    const abs = path.join(__dirname, "..", "public", rel);
+    fs.unlink(abs, () => { /* yut */ });
+}
+
+async function findRecipeForWrite(req, res, recipeid, actionText) {
+    const userid = req.session.userid;
+    const role = req.session.role;
+    const r = await db.execute("SELECT * FROM recipes WHERE recipeid=?", [recipeid]);
+    const recipe = r[0][0];
+
+    if (!recipe) {
+        res.status(404).json({ error: "Tarif bulunamadı" });
+        return null;
+    }
+    if (role !== "admin" && recipe.userid !== userid) {
+        res.status(403).json({ error: `Bu tarifi ${actionText} yetkin yok` });
+        return null;
+    }
+    return recipe;
+}
+
 // GET /api/admin/dashboard
 exports.getDashboard = async (req, res, next) => {
     try {
@@ -59,54 +158,123 @@ exports.getRecipes = async (req, res, next) => {
     }
 };
 
+// GET /api/admin/recipes/:id
+exports.getRecipe = async (req, res, next) => {
+    try {
+        const recipeid = parseInt(req.params.id, 10);
+        if (!Number.isInteger(recipeid)) return res.status(400).json({ error: "Geçersiz tarif" });
+
+        const recipe = await findRecipeForWrite(req, res, recipeid, "düzenleme");
+        if (!recipe) return;
+
+        const ingredients = await db.execute(
+            `SELECT ri.ingredientid, i.name, ri.amount
+             FROM recipe_ingredients ri
+             JOIN ingredients i ON i.ingredientid = ri.ingredientid
+             WHERE ri.recipeid=?
+             ORDER BY i.name ASC`,
+            [recipeid]
+        );
+        const steps = await db.execute(
+            `SELECT stepid, stepOrder, body
+             FROM recipe_steps
+             WHERE recipeid=?
+             ORDER BY stepOrder ASC`,
+            [recipeid]
+        );
+
+        res.json({ recipe, ingredients: ingredients[0], steps: steps[0] });
+    } catch (err) {
+        return next(err);
+    }
+};
+
 // POST /api/admin/recipes — multer single("image")
 // FormData ile gelir. Malzemeler: ing_<id>=on + amt_<id>=miktar
 exports.postRecipe = async (req, res, next) => {
     try {
         const userid = req.session.userid;
-        const title = (req.body.title || "").trim();
-        const exp = (req.body.exp || "").trim();
-        const instructions = (req.body.instructions || "").trim();
-        const categoryid = parseInt(req.body.categoryid, 10);
+        const recipeBody = parseRecipeBody(req.body);
+        const { title, exp, instructions, categoryid, servings, prepMinutes, cookMinutes } = recipeBody;
 
         if (!title || !exp || !instructions || !Number.isInteger(categoryid)) {
             return res.status(400).json({ error: "Tüm alanları doldurun" });
         }
 
-        let baseSlug = tr(title);
-        if (!baseSlug) baseSlug = "tarif";
-        let slug = baseSlug;
-        let i = 2;
-        while (true) {
-            const ex = await db.execute("SELECT 1 FROM recipes WHERE slug=?", [slug]);
-            if (!ex[0][0]) break;
-            slug = baseSlug + "-" + i;
-            i++;
-        }
+        const slug = await makeUniqueSlug(title);
 
         const image = req.file ? "/static/uploads/recipes/" + req.file.filename : null;
 
         const ins = await db.execute(
-            `INSERT INTO recipes (title, slug, exp, instructions, image, categoryid, userid)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [title, slug, exp, instructions, image, categoryid, userid]
+            `INSERT INTO recipes
+                (title, slug, exp, instructions, image, servings, prepMinutes, cookMinutes, categoryid, userid)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                title,
+                slug,
+                exp,
+                instructions,
+                image,
+                servings,
+                prepMinutes,
+                cookMinutes,
+                categoryid,
+                userid
+            ]
         );
         const recipeid = ins[0].insertId;
 
-        const ingIds = [];
-        for (const key of Object.keys(req.body)) {
-            if (key.startsWith("ing_")) {
-                const id = parseInt(key.substring(4), 10);
-                if (Number.isInteger(id)) ingIds.push(id);
-            }
+        await replaceRecipeIngredients(recipeid, req.body);
+        await replaceRecipeSteps(recipeid, instructions);
+
+        res.json({ ok: true, recipeid, slug });
+    } catch (err) {
+        return next(err);
+    }
+};
+
+// POST /api/admin/recipes/:id — tarif düzenleme
+exports.postRecipeUpdate = async (req, res, next) => {
+    try {
+        const recipeid = parseInt(req.params.id, 10);
+        if (!Number.isInteger(recipeid)) return res.status(400).json({ error: "Geçersiz tarif" });
+
+        const oldRecipe = await findRecipeForWrite(req, res, recipeid, "düzenleme");
+        if (!oldRecipe) return;
+
+        const recipeBody = parseRecipeBody(req.body);
+        const { title, exp, instructions, categoryid, servings, prepMinutes, cookMinutes } = recipeBody;
+
+        if (!title || !exp || !instructions || !Number.isInteger(categoryid)) {
+            return res.status(400).json({ error: "Tüm alanları doldurun" });
         }
-        for (const id of ingIds) {
-            const amt = (req.body["amt_" + id] || "").toString().trim() || null;
-            await db.execute(
-                "INSERT INTO recipe_ingredients (recipeid, ingredientid, amount) VALUES (?, ?, ?)",
-                [recipeid, id, amt]
-            );
-        }
+
+        const slug = await makeUniqueSlug(title, recipeid);
+        const image = req.file ? "/static/uploads/recipes/" + req.file.filename : oldRecipe.image;
+
+        await db.execute(
+            `UPDATE recipes
+             SET title=?, slug=?, exp=?, instructions=?, image=?,
+                 servings=?, prepMinutes=?, cookMinutes=?, categoryid=?
+             WHERE recipeid=?`,
+            [
+                title,
+                slug,
+                exp,
+                instructions,
+                image,
+                servings,
+                prepMinutes,
+                cookMinutes,
+                categoryid,
+                recipeid
+            ]
+        );
+
+        await replaceRecipeIngredients(recipeid, req.body);
+        await replaceRecipeSteps(recipeid, instructions);
+
+        if (req.file) removeOldRecipeUpload(oldRecipe.image);
 
         res.json({ ok: true, recipeid, slug });
     } catch (err) {
